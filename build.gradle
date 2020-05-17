@@ -1,0 +1,140 @@
+import groovy.json.JsonSlurper
+
+plugins {
+    id 'java'
+    id 'io.quarkus'
+    id "com.github.ben-manes.versions" version "0.28.0"
+    id "com.chrisgahlert.gradle-dcompose-plugin" version "0.16.1"
+}
+
+repositories {
+     mavenLocal()
+     mavenCentral()
+}
+
+dependencies {
+    implementation enforcedPlatform("${quarkusPlatformGroupId}:${quarkusPlatformArtifactId}:${quarkusPlatformVersion}")
+    implementation 'io.quarkus:quarkus-amazon-lambda-http'
+    implementation 'io.quarkus:quarkus-resteasy'
+    implementation 'io.quarkus:quarkus-resteasy-mutiny'
+    implementation 'io.quarkus:quarkus-vertx-web'
+    implementation 'io.quarkus:quarkus-reactive-pg-client'
+    implementation 'io.quarkus:quarkus-resteasy-jsonb'
+    implementation 'io.smallrye.reactive:smallrye-mutiny-vertx-web-client'
+    implementation 'io.quarkus:quarkus-flyway'
+    implementation 'io.quarkus:quarkus-jdbc-postgresql'
+
+    testCompile "org.testcontainers:testcontainers:$testContainersVersion"
+    testCompile "org.testcontainers:junit-jupiter:$testContainersVersion"
+    testCompile "org.testcontainers:postgresql:$testContainersVersion"
+
+    testImplementation 'io.quarkus:quarkus-test-amazon-lambda'
+    testImplementation 'io.quarkus:quarkus-junit5'
+    testImplementation 'io.rest-assured:rest-assured'
+
+    nativeTestImplementation 'io.quarkus:quarkus-junit5'
+    nativeTestImplementation 'io.rest-assured:rest-assured'
+}
+
+group 'org.acme'
+version '1.0.0-SNAPSHOT'
+
+compileJava {
+    options.encoding = 'UTF-8'
+    options.compilerArgs << '-parameters'
+}
+
+compileTestJava {
+    options.encoding = 'UTF-8'
+}
+
+java {
+    sourceCompatibility = JavaVersion.VERSION_11
+    targetCompatibility = JavaVersion.VERSION_11
+}
+
+test {
+    systemProperty "java.util.logging.manager", "org.jboss.logmanager.LogManager"
+}
+
+dcompose {
+    database {
+        image = 'postgres:latest'
+        portBindings = ["5432:5432"]
+        env = ["POSTGRES_USER=admin", "POSTGRES_PASSWORD=test", "POSTGRES_DB=test"]
+    }
+}
+
+quarkusDev {
+    dependsOn startDatabaseContainer
+    finalizedBy stopDatabaseContainer
+}
+
+task buildLambdaFast(type: GradleBuild) {
+    group 'lambda'
+    defaultTasks << 'build'
+    startParameter.systemPropertiesArgs = ['quarkus.package.type': 'jar']
+    startParameter.excludedTaskNames << "test"
+    startParameter.setWarningMode(WarningMode.All)
+}
+
+task buildLambdaNativeFast(type: GradleBuild) {
+    group 'lambda-native'
+    defaultTasks << 'build'
+    startParameter.systemPropertiesArgs = ['quarkus.package.type': 'native']
+    startParameter.excludedTaskNames << "test"
+    startParameter.setWarningMode(WarningMode.All)
+}
+
+ext.envJson = new JsonSlurper().parseText(file('.env.json').text)
+
+task packageFunction(type: Exec) {
+    group 'lambda'
+    dependsOn buildLambdaFast
+    commandLine 'sh', '-c', "sam package --template-file sam.jvm.yaml --output-template-file $buildDir/packaged.jvm.yaml --s3-bucket ${envJson.QuarkusLambdaFunction.LAMBDA_BUCKET}"
+ }
+
+task packageNativeFunction(type: Exec) {
+    group 'lambda-native'
+    dependsOn buildLambdaNativeFast
+    commandLine 'sh', '-c', "sam package --template-file sam.native.yaml --output-template-file $buildDir/packaged.native.yaml --s3-bucket ${envJson.QuarkusLambdaNativeFunction.LAMBDA_BUCKET}"
+}
+
+task deployFunction(type: Exec) {
+    group 'lambda'
+    dependsOn packageFunction
+    commandLine 'sh', '-c', "sam deploy --template-file $buildDir/packaged.jvm.yaml --capabilities CAPABILITY_IAM --stack-name ${envJson.QuarkusLambdaFunction.LAMBDA_STACK_PREFIX}-jvm"
+}
+
+task deployNativeFunction(type: Exec) {
+    group 'lambda-native'
+    dependsOn packageNativeFunction
+    commandLine 'sh', '-c', "sam deploy --template-file $buildDir/packaged.native.yaml --capabilities CAPABILITY_IAM --stack-name ${envJson.QuarkusLambdaNativeFunction.LAMBDA_STACK_PREFIX}-native"
+}
+
+task describeStack(type: Exec) {
+    group 'lambda'
+    commandLine 'sh', '-c', "aws cloudformation describe-stacks --stack-name ${envJson.QuarkusLambdaFunction.LAMBDA_STACK_PREFIX}-jvm"
+}
+
+task describeNativeStack(type: Exec) {
+    group 'lambda-native'
+    commandLine 'sh', '-c', "aws cloudformation describe-stacks --stack-name ${envJson.QuarkusLambdaNativeFunction.LAMBDA_STACK_PREFIX}-native"
+}
+
+task packageAndDeployAll() {
+    group 'lambda'
+    dependsOn(deployFunction, deployNativeFunction)
+}
+
+task startLocally(type: Exec) {
+    group 'lambda'
+    dependsOn buildLambdaFast
+    commandLine 'sh', '-c', 'sam local start-api --template sam.jvm.local.yaml --env-vars .env.json'
+}
+
+task startNativeLocally(type: Exec) {
+    group 'lambda-native'
+    dependsOn buildLambdaNativeFast
+    commandLine 'sh', '-c', 'sam local start-api --template sam.native.local.yaml --env-vars .env.json'
+}

@@ -1,0 +1,32 @@
+  AWSTemplateFormatVersion: '2010-09-09'
+  Transform: AWS::Serverless-2016-10-31
+  Description: AWS Serverless Quarkus HTTP - org.acme::quarkus-lambda
+  Globals:
+    Api:
+      EndpointConfiguration: REGIONAL
+      BinaryMediaTypes:
+        - "*/*"
+
+  Resources:
+    QuarkusLambdaFunction:
+      Type: AWS::Serverless::Function
+      Properties:
+        Handler: io.quarkus.amazon.lambda.runtime.QuarkusStreamHandler::handleRequest
+        Runtime: java11
+        CodeUri: build/quarkus-lambda-1.0.0-SNAPSHOT-runner.jar
+        MemorySize: 512
+        Role: arn:aws:iam::190326285065:role/lambda-ex
+        Timeout: 10
+        Events:
+          GetResource:
+            Type: Api
+            Properties:
+              Path: /{proxy+}
+              Method: any
+
+  Outputs:
+    QuarkusLambdaApi:
+      Description: URL for application
+      Value: !Sub 'https://${ServerlessRestApi}.execute-api.${AWS::Region}.amazonaws.com/Prod/'
+      Export:
+        Name: QuarkusLambdaApi

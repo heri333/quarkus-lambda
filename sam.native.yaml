@@ -1,0 +1,35 @@
+  AWSTemplateFormatVersion: '2010-09-09'
+  Transform: AWS::Serverless-2016-10-31
+  Description: AWS Serverless Quarkus HTTP - org.acm::quarkus-lambda
+  Globals:
+    Api:
+      EndpointConfiguration: REGIONAL
+      BinaryMediaTypes:
+        - "*/*"
+
+  Resources:
+    QuarkusLambdaNativeFunction:
+      Type: AWS::Serverless::Function
+      Properties:
+        Handler: not.used.in.provided.runtime
+        Runtime: provided
+        CodeUri: build/function.zip
+        MemorySize: 128
+        Role: arn:aws:iam::190326285065:role/lambda-ex
+        Timeout: 10
+        Events:
+          GetResource:
+            Type: Api
+            Properties:
+              Path: /{proxy+}
+              Method: any
+        Environment:
+          Variables:
+            DISABLE_SIGNAL_HANDLERS: true
+
+  Outputs:
+    QuarkusLambdaNativeApi:
+      Description: URL for application
+      Value: !Sub 'https://${ServerlessRestApi}.execute-api.${AWS::Region}.amazonaws.com/Prod/'
+      Export:
+        Name: QuarkusLambdaNativeApi
